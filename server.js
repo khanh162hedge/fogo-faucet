@@ -1,85 +1,65 @@
 const express = require('express');
-const bodyParser = require('body-parser');
 const cors = require('cors');
 const fs = require('fs');
-
-const { Connection, Keypair, PublicKey } = require('@solana/web3.js');
-const {
-  getOrCreateAssociatedTokenAccount,
-  transfer
-} = require('@solana/spl-token');
-
-const walletData = JSON.parse(fs.readFileSync('./wallet.json'));
-
-const connection = new Connection('https://api.testnet.fogo.io');
-const senderWallet = Keypair.fromSecretKey(Uint8Array.from(walletData));
-const FOGO_MINT = new PublicKey('F2rwNcJ5eqxT3efDbKFeuZUtZyRDAdg8fPnaXAfCXHua');
+const { exec } = require('child_process');
+const path = require('path');
 
 const app = express();
+const port = process.env.PORT || 3000;
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-const COOLDOWN = 24 * 60 * 60 * 1000; // 24h
-const historyFile = './history.json';
+const CLAIM_RECORD_PATH = path.join(__dirname, 'claimed_wallets.json');
+let claimedWallets = {};
 
-function loadHistory() {
-  if (!fs.existsSync(historyFile)) return {};
-  return JSON.parse(fs.readFileSync(historyFile));
+// Load danh sách ví đã claim từ file nếu có
+if (fs.existsSync(CLAIM_RECORD_PATH)) {
+  claimedWallets = JSON.parse(fs.readFileSync(CLAIM_RECORD_PATH));
 }
 
-function saveHistory(data) {
-  fs.writeFileSync(historyFile, JSON.stringify(data, null, 2));
-}
-
-async function sendFogoToken(receiverAddress) {
-  const recipient = new PublicKey(receiverAddress);
-
-  const fromTokenAccount = await getOrCreateAssociatedTokenAccount(
-    connection, senderWallet, FOGO_MINT, senderWallet.publicKey
-  );
-
-  const toTokenAccount = await getOrCreateAssociatedTokenAccount(
-    connection, senderWallet, FOGO_MINT, recipient
-  );
-
-  const sig = await transfer(
-    connection,
-    senderWallet,
-    fromTokenAccount.address,
-    toTokenAccount.address,
-    senderWallet,
-    1_000_000 // Gửi 1 token FOGO (vì FOGO có 6 decimal)
-  );
-
-  return sig;
-}
-
-app.post('/faucet', async (req, res) => {
+// API Faucet
+app.post('/claim', (req, res) => {
   const { wallet } = req.body;
-  if (!wallet) return res.status(400).json({ error: 'Thiếu ví!' });
 
-  const history = loadHistory();
+  if (!wallet) {
+    return res.status(400).json({ error: 'Wallet address is required.' });
+  }
+
   const now = Date.now();
+  const lastClaim = claimedWallets[wallet] || 0;
+  const diff = now - lastClaim;
 
-  if (history[wallet] && now - history[wallet] < COOLDOWN) {
-    return res.status(429).json({ error: 'Ví này đã nhận trong 24h qua!' });
+  if (diff < 24 * 60 * 60 * 1000) {
+    const hoursLeft = Math.ceil((24 * 60 * 60 * 1000 - diff) / (60 * 60 * 1000));
+    return res.status(429).json({ error: `This wallet has already claimed. Try again in ${hoursLeft} hour(s).` });
   }
 
-  try {
-    const sig = await sendFogoToken(wallet);
-    history[wallet] = now;
-    saveHistory(history);
-    res.json({ message: `Đã gửi token! Tx: ${sig}` });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Gửi token thất bại!' });
-  }
+  const transferCommand = `fogo transfer --keypair wallet.json --to ${wallet} --amount 1`;
+
+  exec(transferCommand, (error, stdout, stderr) => {
+    if (error) {
+      console.error(`Transfer error: ${error.message}`);
+      return res.status(500).json({ error: 'Token transfer failed.' });
+    }
+
+    if (stderr) {
+      console.warn(`Transfer warning: ${stderr}`);
+    }
+
+    console.log(`Transfer successful: ${stdout}`);
+
+    claimedWallets[wallet] = now;
+    fs.writeFileSync(CLAIM_RECORD_PATH, JSON.stringify(claimedWallets));
+
+    res.json({ success: true, message: '1 FOGO token sent!' });
+  });
 });
+
+// Ping route (optional)
 app.get('/', (req, res) => {
-  res.send('🔥 FOGO Faucet đã sẵn sàng! Gửi POST đến /faucet với JSON chứa địa chỉ ví.');
+  res.send('Faucet server is running.');
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Faucet đang chạy tại cổng ${PORT}`);
+app.listen(port, () => {
+  console.log(`Faucet server listening on port ${port}`);
 });
