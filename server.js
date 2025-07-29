@@ -39,7 +39,6 @@ app.post('/faucet', async (req, res) => {
 
   // Execute the token transfer command
   const tokenMint = 'So11111111111111111111111111111111111111112';
-  const keypairPath = 'wallet.json'; // Replace with your actual keypair path
   const rpcUrl = 'https://testnet.fogo.io';
 
   const keypairPath = path.resolve(__dirname, 'wallet.json');
