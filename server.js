@@ -70,7 +70,7 @@ app.post('/faucet', async (req, res) => {
 
 // Home page
 app.get('/', (req, res) => {
-  res.send('🚰 Welcome to the FOGO Faucet!\nUse POST /faucet with body: { "address": "YOUR_WALLET_ADDRESS" }');
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.listen(PORT, () => {
