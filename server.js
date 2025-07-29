@@ -5,9 +5,9 @@ const { exec } = require('child_process');
 const path = require('path');
 
 const app = express();
+app.use(express.json());
 const port = process.env.PORT || 3000;
 app.use(cors());
-app.use(express.json());
 
 const CLAIM_RECORD_PATH = path.join(__dirname, 'claimed_wallets.json');
 let claimedWallets = {};
@@ -16,6 +16,9 @@ let claimedWallets = {};
 if (fs.existsSync(CLAIM_RECORD_PATH)) {
   claimedWallets = JSON.parse(fs.readFileSync(CLAIM_RECORD_PATH));
 }
+
+// RPC endpoint của Fogo Testnet
+const RPC_ENDPOINT = 'https://testnet.fogo.io';
 
 // API Faucet
 app.post('/faucet', (req, res) => {
@@ -34,9 +37,8 @@ app.post('/faucet', (req, res) => {
     return res.status(429).json({ error: `This wallet has already claimed. Try again in ${hoursLeft} hour(s).` });
   }
 
-  // Dùng endpoint rõ ràng của Fogo
-  const RPC_ENDPOINT = 'https://api.testnet.fogo.io'; // cập nhật đúng endpoint nếu khác
-  const transferCommand = `fogo transfer --rpc ${RPC_ENDPOINT} --keypair wallet.json --to ${wallet} --amount 1`;
+  // Dùng Solana CLI để gửi 1 FOGO (SOL-compatible)
+  const transferCommand = `solana transfer --url ${RPC_ENDPOINT} --keypair wallet.json ${wallet} 1 --allow-unfunded-recipient --fee-payer wallet.json --no-wait`;
 
   exec(transferCommand, (error, stdout, stderr) => {
     if (error) {
@@ -50,7 +52,7 @@ app.post('/faucet', (req, res) => {
     }
 
     if (stderr) {
-      console.warn(`Transfer warning: ${stderr}`);
+      console.warn(`Transfer stderr: ${stderr}`);
     }
 
     console.log(`Transfer successful: ${stdout}`);
