@@ -56,6 +56,11 @@ app.post('/faucet', async (req, res) => {
   });
 });
 
+// Route mặc định để hiển thị nội dung khi vào trang chủ "/"
+app.get('/', (req, res) => {
+  res.send('🚰 Welcome to the FOGO Testnet Faucet!\nUse POST /faucet with JSON body { "address": "YOUR_WALLET_ADDRESS" }');
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Faucet server running on http://localhost:${PORT}`);
