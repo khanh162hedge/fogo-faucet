@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: fogo-faucet
+    env: node
+    plan: free
+    buildCommand: |
+      curl -sSf https://cli.fogo.io/install.sh | bash
+      npm install
+    startCommand: node index.js
+    envVars:
+      - key: NODE_VERSION
+        value: 20
