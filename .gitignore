@@ -1,0 +1,8 @@
+# Env variables
+.env
+
+# Wallet key
+wallet.json
+
+# Logs
+*.log
