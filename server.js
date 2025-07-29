@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const rateLimit = require('express-rate-limit');
 const { exec } = require('child_process');
+const path = require('path');
 
 const app = express();
 app.use(express.static('.'));
@@ -41,7 +42,8 @@ app.post('/faucet', async (req, res) => {
   const keypairPath = 'wallet.json'; // Replace with your actual keypair path
   const rpcUrl = 'https://testnet.fogo.io';
 
-  const cmd = `spl-token transfer ${tokenMint} 1 ${address} --fund-recipient --allow-unfunded-recipient --owner ${keypairPath} --url ${rpcUrl}`;
+  const keypairPath = path.resolve(__dirname, 'wallet.json');
+const cmd = `spl-token transfer ${tokenMint} 1 ${address} --fund-recipient --allow-unfunded-recipient --owner ${keypairPath} --url ${rpcUrl}`;
 
   exec(cmd, (error, stdout, stderr) => {
     if (error) {
