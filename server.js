@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -19,7 +21,6 @@ function saveClaims() {
   fs.writeFileSync(CLAIMS_FILE, JSON.stringify(claimedAddresses, null, 2));
 }
 
-// Faucet endpoint
 app.post('/faucet', async (req, res) => {
   const address = req.body.address;
   if (!address) return res.status(400).json({ error: 'Missing wallet address.' });
@@ -30,24 +31,27 @@ app.post('/faucet', async (req, res) => {
     return res.status(429).json({ error: 'You can only claim once every 24 hours.' });
   }
 
-  const tokenMint = new web3.PublicKey('So11111111111111111111111111111111111111112'); // FOGO testnet mint
+  const tokenMint = new web3.PublicKey('So11111111111111111111111111111111111111112'); // FOGO testnet
   const rpcUrl = 'https://testnet.fogo.io';
   const connection = new web3.Connection(rpcUrl, 'confirmed');
-  const keypairPath = path.join(__dirname, 'wallet.json');
-  const secretKey = Uint8Array.from(JSON.parse(fs.readFileSync(keypairPath)));
-  const fromWallet = web3.Keypair.fromSecretKey(secretKey);
-  const recipient = new web3.PublicKey(address);
 
   try {
-    // Tạo ATA cho người nhận
+    const secretKeyJSON = process.env.PRIVATE_KEY;
+    if (!secretKeyJSON) {
+      throw new Error("PRIVATE_KEY is not set in .env");
+    }
+
+    const secretKey = Uint8Array.from(JSON.parse(secretKeyJSON));
+    const fromWallet = web3.Keypair.fromSecretKey(secretKey);
+    const recipient = new web3.PublicKey(address);
+
     const recipientTokenAccount = await splToken.getOrCreateAssociatedTokenAccount(
       connection,
-      fromWallet, // payer
+      fromWallet,
       tokenMint,
       recipient
     );
 
-    // Tạo transaction chuyển 1 token (1e9 nếu decimals là 9)
     const tx = new web3.Transaction().add(
       splToken.createTransferInstruction(
         await splToken.getAssociatedTokenAddress(tokenMint, fromWallet.publicKey),
@@ -68,7 +72,6 @@ app.post('/faucet', async (req, res) => {
   }
 });
 
-// Home page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
