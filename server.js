@@ -1,14 +1,13 @@
 const express = require('express');
 const fs = require('fs');
-const rateLimit = require('express-rate-limit');
-const { exec } = require('child_process');
 const path = require('path');
+const web3 = require('@solana/web3.js');
+const splToken = require('@solana/spl-token');
 
 const app = express();
-app.use(express.static('.'));
-const PORT = 3000;
-
 app.use(express.json());
+
+const PORT = process.env.PORT || 3000;
 
 // Load claimed addresses
 let claimedAddresses = {};
@@ -16,8 +15,6 @@ const CLAIMS_FILE = 'claims.json';
 if (fs.existsSync(CLAIMS_FILE)) {
   claimedAddresses = JSON.parse(fs.readFileSync(CLAIMS_FILE));
 }
-
-// Save claimed addresses to file
 function saveClaims() {
   fs.writeFileSync(CLAIMS_FILE, JSON.stringify(claimedAddresses, null, 2));
 }
@@ -25,44 +22,57 @@ function saveClaims() {
 // Faucet endpoint
 app.post('/faucet', async (req, res) => {
   const address = req.body.address;
-
-  if (!address) {
-    return res.status(400).send({ error: 'Wallet address is required.' });
-  }
+  if (!address) return res.status(400).json({ error: 'Missing wallet address.' });
 
   const now = Date.now();
   const lastClaim = claimedAddresses[address];
-
   if (lastClaim && now - lastClaim < 24 * 60 * 60 * 1000) {
-    return res.status(429).send({ error: 'You can only claim once every 24 hours.' });
+    return res.status(429).json({ error: 'You can only claim once every 24 hours.' });
   }
 
-  // Execute the token transfer command
-  const tokenMint = 'So11111111111111111111111111111111111111112';
+  const tokenMint = new web3.PublicKey('So11111111111111111111111111111111111111112'); // FOGO testnet mint
   const rpcUrl = 'https://testnet.fogo.io';
+  const connection = new web3.Connection(rpcUrl, 'confirmed');
+  const keypairPath = path.join(__dirname, 'wallet.json');
+  const secretKey = Uint8Array.from(JSON.parse(fs.readFileSync(keypairPath)));
+  const fromWallet = web3.Keypair.fromSecretKey(secretKey);
+  const recipient = new web3.PublicKey(address);
 
-  const keypairPath = path.resolve(__dirname, 'wallet.json');
-const cmd = `spl-token transfer ${tokenMint} 1 ${address} --fund-recipient --allow-unfunded-recipient --owner ${keypairPath} --url ${rpcUrl}`;
+  try {
+    // Tạo ATA cho người nhận
+    const recipientTokenAccount = await splToken.getOrCreateAssociatedTokenAccount(
+      connection,
+      fromWallet, // payer
+      tokenMint,
+      recipient
+    );
 
-  exec(cmd, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`Transfer error: ${stderr}`);
-      return res.status(500).send({ error: 'Token transfer failed.', details: stderr });
-    }
+    // Tạo transaction chuyển 1 token (1e9 nếu decimals là 9)
+    const tx = new web3.Transaction().add(
+      splToken.createTransferInstruction(
+        await splToken.getAssociatedTokenAddress(tokenMint, fromWallet.publicKey),
+        recipientTokenAccount.address,
+        fromWallet.publicKey,
+        1_000_000_000 // 1 FOGO
+      )
+    );
 
-    console.log(`Transfer successful: ${stdout}`);
+    const signature = await web3.sendAndConfirmTransaction(connection, tx, [fromWallet]);
     claimedAddresses[address] = now;
     saveClaims();
-    res.send({ message: '1 FOGO token sent successfully!', log: stdout });
-  });
+
+    res.json({ message: '1 FOGO token sent successfully!', signature });
+  } catch (err) {
+    console.error('Transfer failed:', err);
+    res.status(500).json({ error: 'Transfer failed.', details: err.message });
+  }
 });
 
-// Route mặc định để hiển thị nội dung khi vào trang chủ "/"
+// Home page
 app.get('/', (req, res) => {
-  res.send('🚰 Welcome to the FOGO Testnet Faucet!\nUse POST /faucet with JSON body { "address": "YOUR_WALLET_ADDRESS" }');
+  res.send('🚰 Welcome to the FOGO Faucet!\nUse POST /faucet with body: { "address": "YOUR_WALLET_ADDRESS" }');
 });
 
-// Start server
 app.listen(PORT, () => {
   console.log(`Faucet server running on http://localhost:${PORT}`);
 });
