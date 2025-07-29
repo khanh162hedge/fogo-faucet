@@ -75,7 +75,11 @@ app.post('/faucet', async (req, res) => {
     res.status(500).json({ error: 'Gửi token thất bại!' });
   }
 });
+app.get('/', (req, res) => {
+  res.send('🔥 FOGO Faucet đã sẵn sàng! Gửi POST đến /faucet với JSON chứa địa chỉ ví.');
+});
 
-app.listen(3000, () => {
-  console.log('✅ Faucet đang chạy tại http://localhost:3000');
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`✅ Faucet đang chạy tại cổng ${PORT}`);
 });
