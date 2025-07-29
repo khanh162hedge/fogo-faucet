@@ -12,13 +12,13 @@ app.use(express.json());
 const CLAIM_RECORD_PATH = path.join(__dirname, 'claimed_wallets.json');
 let claimedWallets = {};
 
-// Load danh sách ví đã claim từ file nếu có
+// Load dữ liệu đã claim
 if (fs.existsSync(CLAIM_RECORD_PATH)) {
   claimedWallets = JSON.parse(fs.readFileSync(CLAIM_RECORD_PATH));
 }
 
 // API Faucet
-app.post('/claim', (req, res) => {
+app.post('/faucet', (req, res) => {
   const { wallet } = req.body;
 
   if (!wallet) {
@@ -34,12 +34,19 @@ app.post('/claim', (req, res) => {
     return res.status(429).json({ error: `This wallet has already claimed. Try again in ${hoursLeft} hour(s).` });
   }
 
-  const transferCommand = `fogo transfer --keypair wallet.json --to ${wallet} --amount 1`;
+  // Dùng endpoint rõ ràng của Fogo
+  const RPC_ENDPOINT = 'https://api.testnet.fogo.io'; // cập nhật đúng endpoint nếu khác
+  const transferCommand = `fogo transfer --rpc ${RPC_ENDPOINT} --keypair wallet.json --to ${wallet} --amount 1`;
 
   exec(transferCommand, (error, stdout, stderr) => {
     if (error) {
       console.error(`Transfer error: ${error.message}`);
-      return res.status(500).json({ error: 'Token transfer failed.' });
+      return res.status(500).json({ error: 'Token transfer failed.', detail: error.message });
+    }
+
+    if (stderr.includes('failed to get info about account')) {
+      console.error(`RPC error: ${stderr}`);
+      return res.status(500).json({ error: 'RPC fetch failed. Check RPC endpoint or network.' });
     }
 
     if (stderr) {
@@ -47,7 +54,6 @@ app.post('/claim', (req, res) => {
     }
 
     console.log(`Transfer successful: ${stdout}`);
-
     claimedWallets[wallet] = now;
     fs.writeFileSync(CLAIM_RECORD_PATH, JSON.stringify(claimedWallets));
 
@@ -55,9 +61,9 @@ app.post('/claim', (req, res) => {
   });
 });
 
-// Ping route (optional)
+// Route mặc định
 app.get('/', (req, res) => {
-  res.send('Faucet server is running.');
+  res.send('🔥 FOGO Faucet đã sẵn sàng! Gửi POST đến /faucet với JSON chứa địa chỉ ví.');
 });
 
 app.listen(port, () => {
