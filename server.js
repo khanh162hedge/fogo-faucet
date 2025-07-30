@@ -74,7 +74,7 @@ app.post('/faucet', async (req, res) => {
         fromTokenAccount,
         recipientTokenAccount.address,
         fromWallet.publicKey,
-        1_000_000_000 // 1 FOGO
+        500_000_000 // 0.5 FOGO
       )
     );
 
