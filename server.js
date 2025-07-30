@@ -11,7 +11,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Load claimed addresses
+// === Load claimed addresses ===
 let claimedAddresses = {};
 const CLAIMS_FILE = 'claims.json';
 if (fs.existsSync(CLAIMS_FILE)) {
@@ -23,18 +23,46 @@ if (fs.existsSync(CLAIMS_FILE)) {
   }
 }
 
-function saveClaims() {
-  fs.writeFileSync(CLAIMS_FILE, JSON.stringify(claimedAddresses, null, 2));
+// === Load IP claims ===
+let ipClaims = {};
+const IP_CLAIMS_FILE = 'ip_claims.json';
+if (fs.existsSync(IP_CLAIMS_FILE)) {
+  try {
+    ipClaims = JSON.parse(fs.readFileSync(IP_CLAIMS_FILE));
+  } catch (e) {
+    console.error('Failed to parse IP claims file:', e);
+    ipClaims = {};
+  }
 }
 
+function saveClaims() {
+  fs.writeFileSync(CLAIMS_FILE, JSON.stringify(claimedAddresses, null, 2));
+  fs.writeFileSync(IP_CLAIMS_FILE, JSON.stringify(ipClaims, null, 2));
+}
+
+// === Faucet endpoint ===
 app.post('/faucet', async (req, res) => {
   const address = req.body.address;
   if (!address) return res.status(400).json({ error: 'Missing wallet address.' });
 
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   const now = Date.now();
-  const lastClaim = claimedAddresses[address];
-  if (lastClaim && now - lastClaim < 24 * 60 * 60 * 1000) {
-    return res.status(429).json({ error: 'You can only claim once every 24 hours.' });
+
+  // Check if this IP already used a wallet
+  const ipInfo = ipClaims[ip];
+  if (ipInfo) {
+    const { address: prevAddress, timestamp } = ipInfo;
+
+    // Same IP & different address & within 24h => reject
+    if (prevAddress !== address && now - timestamp < 24 * 60 * 60 * 1000) {
+      return res.status(429).json({ error: 'This IP has already used a different wallet in the last 24 hours.' });
+    }
+
+    // Same address again but within cooldown
+    const lastClaim = claimedAddresses[address];
+    if (lastClaim && now - lastClaim < 24 * 60 * 60 * 1000) {
+      return res.status(429).json({ error: 'You can only claim once every 24 hours.' });
+    }
   }
 
   const tokenMint = new web3.PublicKey('So11111111111111111111111111111111111111112'); // FOGO testnet
@@ -43,9 +71,7 @@ app.post('/faucet', async (req, res) => {
 
   try {
     const secretKeyJSON = process.env.PRIVATE_KEY;
-    if (!secretKeyJSON) {
-      throw new Error("PRIVATE_KEY is not set in .env");
-    }
+    if (!secretKeyJSON) throw new Error("PRIVATE_KEY is not set in .env");
 
     let secretKey;
     try {
@@ -79,7 +105,10 @@ app.post('/faucet', async (req, res) => {
     );
 
     const signature = await web3.sendAndConfirmTransaction(connection, tx, [fromWallet]);
+
+    // Save claims
     claimedAddresses[address] = now;
+    ipClaims[ip] = { address, timestamp: now };
     saveClaims();
 
     res.json({ message: '1 FOGO token sent successfully!', signature });
@@ -89,10 +118,12 @@ app.post('/faucet', async (req, res) => {
   }
 });
 
+// === Home page ===
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// === Start server ===
 app.listen(PORT, () => {
   console.log(`✅ Faucet server running on http://localhost:${PORT}`);
 });
