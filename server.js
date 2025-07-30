@@ -1,129 +1,61 @@
-require('dotenv').config();
-
 const express = require('express');
 const fs = require('fs');
-const path = require('path');
-const web3 = require('@solana/web3.js');
-const splToken = require('@solana/spl-token');
-
 const app = express();
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
-
-// === Load claimed addresses ===
-let claimedAddresses = {};
 const CLAIMS_FILE = 'claims.json';
-if (fs.existsSync(CLAIMS_FILE)) {
-  try {
-    claimedAddresses = JSON.parse(fs.readFileSync(CLAIMS_FILE));
-  } catch (e) {
-    console.error('Failed to parse claims file:', e);
-    claimedAddresses = {};
-  }
-}
-
-// === Load IP claims ===
-let ipClaims = {};
 const IP_CLAIMS_FILE = 'ip_claims.json';
-if (fs.existsSync(IP_CLAIMS_FILE)) {
+const COOLDOWN_HOURS = 24;
+
+function loadJson(filename) {
   try {
-    ipClaims = JSON.parse(fs.readFileSync(IP_CLAIMS_FILE));
-  } catch (e) {
-    console.error('Failed to parse IP claims file:', e);
-    ipClaims = {};
+    return JSON.parse(fs.readFileSync(filename));
+  } catch {
+    return {};
   }
 }
 
-function saveClaims() {
-  fs.writeFileSync(CLAIMS_FILE, JSON.stringify(claimedAddresses, null, 2));
-  fs.writeFileSync(IP_CLAIMS_FILE, JSON.stringify(ipClaims, null, 2));
+function saveJson(filename, data) {
+  fs.writeFileSync(filename, JSON.stringify(data, null, 2));
 }
 
-// === Faucet endpoint ===
 app.post('/faucet', async (req, res) => {
-  const address = req.body.address;
-  if (!address) return res.status(400).json({ error: 'Missing wallet address.' });
-
+  const { wallet } = req.body;
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+  if (!wallet) return res.status(400).json({ error: 'Missing wallet address' });
+
+  const claims = loadJson(CLAIMS_FILE);
+  const ipClaims = loadJson(IP_CLAIMS_FILE);
   const now = Date.now();
 
-  // Check if this IP already used a wallet
-  const ipInfo = ipClaims[ip];
-  if (ipInfo) {
-    const { address: prevAddress, timestamp } = ipInfo;
-
-    // Same IP & different address & within 24h => reject
-    if (prevAddress !== address && now - timestamp < 24 * 60 * 60 * 1000) {
-      return res.status(429).json({ error: 'This IP has already used a different wallet in the last 24 hours.' });
-    }
-
-    // Same address again but within cooldown
-    const lastClaim = claimedAddresses[address];
-    if (lastClaim && now - lastClaim < 24 * 60 * 60 * 1000) {
-      return res.status(429).json({ error: 'You can only claim once every 24 hours.' });
-    }
+  // Check wallet cooldown
+  const lastClaimTime = claims[wallet];
+  if (lastClaimTime && now - lastClaimTime < COOLDOWN_HOURS * 3600 * 1000) {
+    const hoursLeft = ((COOLDOWN_HOURS * 3600 * 1000 - (now - lastClaimTime)) / 3600000).toFixed(1);
+    return res.status(429).json({ error: `Wallet cooldown: try again in ${hoursLeft}h` });
   }
 
-  const tokenMint = new web3.PublicKey('So11111111111111111111111111111111111111112'); // FOGO testnet
-  const rpcUrl = 'https://testnet.fogo.io';
-  const connection = new web3.Connection(rpcUrl, 'confirmed');
+  // Check IP cooldown
+  const lastIpClaim = ipClaims[ip];
+  if (lastIpClaim && now - lastIpClaim.timestamp < COOLDOWN_HOURS * 3600 * 1000) {
+    return res.status(429).json({ error: `This IP already claimed a wallet within 24h.` });
+  }
 
+  // ✅ If passed checks, send token
   try {
-    const secretKeyJSON = process.env.PRIVATE_KEY;
-    if (!secretKeyJSON) throw new Error("PRIVATE_KEY is not set in .env");
+    await sendToken(wallet); // gọi hàm gửi token 0.5 FOGO của bạn ở đây
 
-    let secretKey;
-    try {
-      secretKey = Uint8Array.from(JSON.parse(secretKeyJSON));
-    } catch (e) {
-      throw new Error("PRIVATE_KEY in .env is not a valid JSON array");
-    }
+    claims[wallet] = now;
+    ipClaims[ip] = { wallet, timestamp: now };
 
-    const fromWallet = web3.Keypair.fromSecretKey(secretKey);
-    const recipient = new web3.PublicKey(address);
+    saveJson(CLAIMS_FILE, claims);
+    saveJson(IP_CLAIMS_FILE, ipClaims);
 
-    const recipientTokenAccount = await splToken.getOrCreateAssociatedTokenAccount(
-      connection,
-      fromWallet,
-      tokenMint,
-      recipient
-    );
-
-    const fromTokenAccount = await splToken.getAssociatedTokenAddress(
-      tokenMint,
-      fromWallet.publicKey
-    );
-
-    const tx = new web3.Transaction().add(
-      splToken.createTransferInstruction(
-        fromTokenAccount,
-        recipientTokenAccount.address,
-        fromWallet.publicKey,
-        500_000_000 // 0.5 FOGO
-      )
-    );
-
-    const signature = await web3.sendAndConfirmTransaction(connection, tx, [fromWallet]);
-
-    // Save claims
-    claimedAddresses[address] = now;
-    ipClaims[ip] = { address, timestamp: now };
-    saveClaims();
-
-    res.json({ message: '1 FOGO token sent successfully!', signature });
+    return res.json({ success: true, message: 'Sent 0.5 FOGO to wallet!' });
   } catch (err) {
     console.error('Transfer failed:', err);
-    res.status(500).json({ error: 'Transfer failed.', details: err.message });
+    return res.status(500).json({ error: 'Transfer failed' });
   }
 });
 
-// === Home page ===
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// === Start server ===
-app.listen(PORT, () => {
-  console.log(`✅ Faucet server running on http://localhost:${PORT}`);
-});
+app.listen(3000, () => console.log('Faucet server running on port 3000'));
