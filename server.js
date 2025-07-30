@@ -15,8 +15,14 @@ const PORT = process.env.PORT || 3000;
 let claimedAddresses = {};
 const CLAIMS_FILE = 'claims.json';
 if (fs.existsSync(CLAIMS_FILE)) {
-  claimedAddresses = JSON.parse(fs.readFileSync(CLAIMS_FILE));
+  try {
+    claimedAddresses = JSON.parse(fs.readFileSync(CLAIMS_FILE));
+  } catch (e) {
+    console.error('Failed to parse claims file:', e);
+    claimedAddresses = {};
+  }
 }
+
 function saveClaims() {
   fs.writeFileSync(CLAIMS_FILE, JSON.stringify(claimedAddresses, null, 2));
 }
@@ -41,7 +47,13 @@ app.post('/faucet', async (req, res) => {
       throw new Error("PRIVATE_KEY is not set in .env");
     }
 
-    const secretKey = Uint8Array.from(JSON.parse(secretKeyJSON));
+    let secretKey;
+    try {
+      secretKey = Uint8Array.from(JSON.parse(secretKeyJSON));
+    } catch (e) {
+      throw new Error("PRIVATE_KEY in .env is not a valid JSON array");
+    }
+
     const fromWallet = web3.Keypair.fromSecretKey(secretKey);
     const recipient = new web3.PublicKey(address);
 
@@ -52,9 +64,14 @@ app.post('/faucet', async (req, res) => {
       recipient
     );
 
+    const fromTokenAccount = await splToken.getAssociatedTokenAddress(
+      tokenMint,
+      fromWallet.publicKey
+    );
+
     const tx = new web3.Transaction().add(
       splToken.createTransferInstruction(
-        await splToken.getAssociatedTokenAddress(tokenMint, fromWallet.publicKey),
+        fromTokenAccount,
         recipientTokenAccount.address,
         fromWallet.publicKey,
         1_000_000_000 // 1 FOGO
@@ -77,5 +94,5 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Faucet server running on http://localhost:${PORT}`);
+  console.log(`✅ Faucet server running on http://localhost:${PORT}`);
 });
